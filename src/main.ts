@@ -39,6 +39,12 @@ function viewOptions(): BasesAllOptions[] {
 			items: [
 				{
 					type: 'toggle',
+					displayName: 'Manual note order (drag headers to reorder)',
+					key: CONFIG_KEYS.manualOrder,
+					default: false,
+				},
+				{
+					type: 'toggle',
 					displayName: 'Raw move by default (no provenance)',
 					key: CONFIG_KEYS.rawMove,
 					default: false,

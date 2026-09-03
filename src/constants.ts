@@ -13,6 +13,8 @@ export const CONFIG_KEYS = {
 	separator: 'taskRelaySeparator',
 	movedWording: 'taskRelayMovedWording',
 	pulledWording: 'taskRelayPulledWording',
+	manualOrder: 'taskRelayManualOrder',
+	order: 'taskRelayOrder',
 } as const;
 
 /** Default provenance formatting. */

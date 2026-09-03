@@ -42,6 +42,29 @@
 	box-shadow: 0 0 0 1px var(--interactive-accent);
 }
 
+.task-relay-note.is-reordering {
+	opacity: 0.5;
+}
+
+.task-relay-note.is-reorder-before {
+	box-shadow: inset 0 2px 0 0 var(--interactive-accent);
+}
+
+.task-relay-note.is-reorder-after {
+	box-shadow: inset 0 -2px 0 0 var(--interactive-accent);
+}
+
+.task-relay-grip {
+	display: inline-flex;
+	align-items: center;
+	color: var(--text-faint);
+	cursor: grab;
+}
+
+.task-relay-grip:hover {
+	color: var(--text-muted);
+}
+
 .task-relay-note-header {
 	display: flex;
 	align-items: center;

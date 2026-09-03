@@ -29,6 +29,7 @@ import { renderProperties } from './properties';
 import { logger } from '../logger';
 
 const DRAG_MIME = 'application/json';
+const SECTION_MIME = 'application/x-task-relay-section';
 
 /**
  * A custom Bases view that turns the notes selected by a Base into a task
@@ -47,6 +48,8 @@ export class TaskRelayView extends BasesView {
 	private readonly collapsed = new Set<string>();
 	/** Paths currently rendered, used to react to relevant vault changes. */
 	private displayedPaths = new Set<string>();
+	/** Paths in current render order, used as the basis for manual reordering. */
+	private renderedOrder: string[] = [];
 
 	private eventsReady = false;
 	private renderToken = 0;
@@ -136,16 +139,45 @@ export class TaskRelayView extends BasesView {
 		return this.config?.get(CONFIG_KEYS.rawMove) === true;
 	}
 
+	private manualOrder(): boolean {
+		return this.config?.get(CONFIG_KEYS.manualOrder) === true;
+	}
+
+	private storedOrder(): string[] {
+		const value = this.config?.get(CONFIG_KEYS.order);
+		return Array.isArray(value)
+			? value.filter((item): item is string => typeof item === 'string')
+			: [];
+	}
+
+	private writeStoredOrder(paths: string[]): void {
+		this.config?.set(CONFIG_KEYS.order, paths);
+		this.scheduleRender();
+	}
+
 	private async renderNow(): Promise<void> {
 		this.ensureEvents();
 		const token = ++this.renderToken;
 
-		const entries = (this.data ? [...this.data.data] : []).filter(
+		let entries = (this.data ? [...this.data.data] : []).filter(
 			(entry) => entry.file.extension === 'md',
 		);
+		// When manual order is enabled, override Base sort with the order stored
+		// in the Base view config. Unlisted notes keep their Base order at the end.
+		if (this.manualOrder()) {
+			const rank = new Map(
+				this.storedOrder().map((path, index) => [path, index]),
+			);
+			entries = [...entries].sort(
+				(a, b) =>
+					(rank.get(a.file.path) ?? Number.MAX_SAFE_INTEGER) -
+					(rank.get(b.file.path) ?? Number.MAX_SAFE_INTEGER),
+			);
+		}
 		const order: BasesPropertyId[] = this.config?.getOrder?.() ?? [];
 		const files = entries.map((entry) => entry.file);
 		this.displayedPaths = new Set(files.map((file) => file.path));
+		this.renderedOrder = files.map((file) => file.path);
 
 		const contents = await Promise.all(
 			files.map((file) =>
@@ -191,6 +223,23 @@ export class TaskRelayView extends BasesView {
 		if (isCollapsed) sectionEl.addClass('is-collapsed');
 
 		const headerEl = sectionEl.createDiv('task-relay-note-header');
+
+		if (this.manualOrder()) {
+			const grip = headerEl.createSpan('task-relay-grip');
+			setIcon(grip, 'grip-vertical');
+			grip.setAttribute('aria-label', 'Drag to reorder');
+			headerEl.setAttribute('draggable', 'true');
+			headerEl.addEventListener('dragstart', (event) => {
+				if (!event.dataTransfer) return;
+				event.dataTransfer.setData(SECTION_MIME, file.path);
+				event.dataTransfer.effectAllowed = 'move';
+				sectionEl.addClass('is-reordering');
+			});
+			headerEl.addEventListener('dragend', () =>
+				sectionEl.removeClass('is-reordering'),
+			);
+		}
+
 		const chevron = headerEl.createSpan('task-relay-chevron');
 		setIcon(chevron, isCollapsed ? 'chevron-right' : 'chevron-down');
 		chevron.addEventListener('click', () => this.toggleCollapse(file.path));
@@ -275,19 +324,65 @@ export class TaskRelayView extends BasesView {
 	}
 
 	private makeDropTarget(sectionEl: HTMLElement, destPath: string): void {
+		const clearIndicators = () => {
+			sectionEl.removeClass('is-drop-target');
+			sectionEl.removeClass('is-reorder-before');
+			sectionEl.removeClass('is-reorder-after');
+		};
 		sectionEl.addEventListener('dragover', (event) => {
 			event.preventDefault();
 			if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-			sectionEl.addClass('is-drop-target');
+			if (this.isSectionDrag(event)) {
+				const before = this.isAbove(event, sectionEl);
+				sectionEl.toggleClass('is-reorder-before', before);
+				sectionEl.toggleClass('is-reorder-after', !before);
+			} else {
+				sectionEl.addClass('is-drop-target');
+			}
 		});
-		sectionEl.addEventListener('dragleave', () => {
-			sectionEl.removeClass('is-drop-target');
-		});
+		sectionEl.addEventListener('dragleave', clearIndicators);
 		sectionEl.addEventListener('drop', (event) => {
 			event.preventDefault();
-			sectionEl.removeClass('is-drop-target');
+			const before = this.isAbove(event, sectionEl);
+			clearIndicators();
+			const sectionSrc = event.dataTransfer?.getData(SECTION_MIME);
+			if (sectionSrc) {
+				this.handleReorder(sectionSrc, destPath, before);
+				return;
+			}
 			void this.handleDrop(destPath, event);
 		});
+	}
+
+	private isSectionDrag(event: DragEvent): boolean {
+		const types = event.dataTransfer?.types;
+		return types ? Array.from(types).includes(SECTION_MIME) : false;
+	}
+
+	private isAbove(event: DragEvent, el: HTMLElement): boolean {
+		const rect = el.getBoundingClientRect();
+		return event.clientY < rect.top + rect.height / 2;
+	}
+
+	/** Reorder note sections and persist the new order in the Base view config. */
+	private handleReorder(
+		srcPath: string,
+		destPath: string,
+		before: boolean,
+	): void {
+		if (srcPath === destPath) return;
+		const order = [...this.renderedOrder];
+		const from = order.indexOf(srcPath);
+		if (from < 0) return;
+		order.splice(from, 1);
+		const to = order.indexOf(destPath);
+		if (to < 0) {
+			order.push(srcPath);
+		} else {
+			order.splice(before ? to : to + 1, 0, srcPath);
+		}
+		logger.info('Reorder', { srcPath, destPath, before });
+		this.writeStoredOrder(order);
 	}
 
 	private async handleDrop(destPath: string, event: DragEvent): Promise<void> {
