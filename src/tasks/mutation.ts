@@ -15,6 +15,9 @@ function requireFile(app: App, path: string): TFile {
 	if (!(file instanceof TFile)) {
 		throw new TaskMutationError(`File not found: ${path}`);
 	}
+	if (file.extension !== 'md') {
+		throw new TaskMutationError(`Not a Markdown note: ${path}`);
+	}
 	return file;
 }
 

@@ -28,5 +28,8 @@ data.json
 coverage
 .vitest
 
+# Log files
+*.log
+
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store

@@ -10,9 +10,12 @@ import {
 	VIEW_TYPE,
 } from './constants';
 import { TaskRelayView } from './view/workbench-view';
+import { logger } from './logger';
 
 export default class TaskRelayPlugin extends Plugin {
 	onload(): void {
+		logger.init(this.app, this.manifest.dir ?? '');
+		logger.info('Plugin loaded', { version: this.manifest.version });
 		this.registerBasesView(VIEW_TYPE, {
 			name: VIEW_NAME,
 			icon: VIEW_ICON,

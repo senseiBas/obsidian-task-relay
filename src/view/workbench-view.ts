@@ -23,6 +23,7 @@ import type { DragPayload, ParsedTask, ProvenanceOptions } from '../types';
 import { parseOpenTasks } from '../tasks/parser';
 import { pullTask, rawMoveTask, toggleTask } from '../tasks/mutation';
 import { renderProperties } from './properties';
+import { logger } from '../logger';
 
 const DRAG_MIME = 'application/json';
 
@@ -116,7 +117,9 @@ export class TaskRelayView extends BasesView {
 		this.ensureEvents();
 		const token = ++this.renderToken;
 
-		const entries = this.data ? [...this.data.data] : [];
+		const entries = (this.data ? [...this.data.data] : []).filter(
+			(entry) => entry.file.extension === 'md',
+		);
 		const order: BasesPropertyId[] = this.config?.getOrder?.() ?? [];
 		const files = entries.map((entry) => entry.file);
 		this.displayedPaths = new Set(files.map((file) => file.path));
@@ -128,6 +131,8 @@ export class TaskRelayView extends BasesView {
 		);
 		// A newer render superseded this one while awaiting file reads.
 		if (token !== this.renderToken) return;
+
+		logger.info('Rendered workbench', { notes: entries.length });
 
 		this.listEl.empty();
 		if (entries.length === 0) {
@@ -230,6 +235,7 @@ export class TaskRelayView extends BasesView {
 			event.dataTransfer.setData(DRAG_MIME, JSON.stringify(payload));
 			event.dataTransfer.effectAllowed = 'move';
 			cardEl.addClass('is-dragging');
+			logger.info('Drag start', { sourcePath, text: task.text });
 		});
 		cardEl.addEventListener('dragend', () => cardEl.removeClass('is-dragging'));
 	}
@@ -252,19 +258,36 @@ export class TaskRelayView extends BasesView {
 
 	private async handleDrop(destPath: string, event: DragEvent): Promise<void> {
 		const raw = event.dataTransfer?.getData(DRAG_MIME);
-		if (!raw) return;
+		if (!raw) {
+			logger.info('Drop ignored: no drag payload', { destPath });
+			return;
+		}
 		let payload: DragPayload;
 		try {
 			payload = JSON.parse(raw) as DragPayload;
-		} catch {
+		} catch (error) {
+			logger.error('Drop failed: invalid payload', {
+				destPath,
+				error: String(error),
+			});
 			return;
 		}
 		if (!payload?.sourcePath || !payload.task) return;
-		if (payload.sourcePath === destPath) return;
+		if (payload.sourcePath === destPath) {
+			logger.info('Drop ignored: same note', { destPath });
+			return;
+		}
 
 		const useRaw = this.rawMoveDefault()
 			? !event.shiftKey
 			: event.shiftKey;
+
+		logger.info('Drop', {
+			sourcePath: payload.sourcePath,
+			destPath,
+			useRaw,
+			text: payload.task.text,
+		});
 
 		try {
 			if (useRaw) {
@@ -278,7 +301,16 @@ export class TaskRelayView extends BasesView {
 					this.provenanceOptions(),
 				);
 			}
+			logger.info('Move complete', {
+				sourcePath: payload.sourcePath,
+				destPath,
+			});
 		} catch (error) {
+			logger.error('Move failed', {
+				sourcePath: payload.sourcePath,
+				destPath,
+				error: error instanceof Error ? error.message : String(error),
+			});
 			new Notice(
 				error instanceof Error
 					? error.message
