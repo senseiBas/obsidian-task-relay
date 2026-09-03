@@ -1,0 +1,10 @@
+{
+	"id": "obsidian-task-relay",
+	"name": "Task Relay",
+	"version": "0.1.0",
+	"minAppVersion": "1.10.0",
+	"description": "A native Obsidian Bases view for task triage: pull Markdown tasks between your notes while keeping the context.",
+	"author": "senseiBas",
+	"authorUrl": "https://github.com/senseiBas",
+	"isDesktopOnly": false
+}
