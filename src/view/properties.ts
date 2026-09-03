@@ -1,10 +1,27 @@
-import { App, parsePropertyId, TFile } from 'obsidian';
+import { App, TFile } from 'obsidian';
 import type { BasesEntry, BasesPropertyId, BasesViewConfig } from 'obsidian';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}/;
 
 function isDateLike(value: unknown): value is string {
 	return typeof value === 'string' && DATE_RE.test(value);
+}
+
+/**
+ * Split a Base property id into its source type and name. Handles both the
+ * prefixed form (`note.done`, `file.name`) and the bare form (`done`) that
+ * Bases may store in the view config; bare names are treated as note
+ * (frontmatter) properties.
+ */
+function parseProp(propId: string): { type: string; name: string } {
+	const dot = propId.indexOf('.');
+	if (dot > 0) {
+		const type = propId.slice(0, dot);
+		if (type === 'note' || type === 'file' || type === 'formula') {
+			return { type, name: propId.slice(dot + 1) };
+		}
+	}
+	return { type: 'note', name: propId };
 }
 
 /**
@@ -47,7 +64,7 @@ export function renderProperties(
 		{}) as Record<string, unknown>;
 
 	for (const propId of order) {
-		const parsed = parsePropertyId(propId);
+		const parsed = parseProp(propId);
 		// The file name is already shown as the section title.
 		if (parsed.type === 'file' && parsed.name === 'name') continue;
 
