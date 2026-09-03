@@ -153,3 +153,13 @@
 	white-space: pre-wrap;
 	word-break: break-word;
 }
+
+.task-relay-card-text p {
+	margin: 0;
+	display: inline;
+}
+
+.task-relay-card-text a.internal-link,
+.task-relay-card-text a.external-link {
+	cursor: pointer;
+}

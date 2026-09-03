@@ -1,6 +1,8 @@
 import {
 	BasesView,
 	debounce,
+	MarkdownRenderer,
+	MarkdownView,
 	Notice,
 	setIcon,
 	TAbstractFile,
@@ -11,6 +13,7 @@ import type {
 	BasesPropertyId,
 	Debouncer,
 	QueryController,
+	WorkspaceLeaf,
 } from 'obsidian';
 import {
 	CONFIG_KEYS,
@@ -48,6 +51,11 @@ export class TaskRelayView extends BasesView {
 	private eventsReady = false;
 	private renderToken = 0;
 	private readonly scheduleRender: Debouncer<[], void>;
+
+	/** The task currently being dragged, so drops onto open editors also work. */
+	private pendingDrag: DragPayload | null = null;
+	/** The leaf used to show opened notes, reused across clicks. */
+	private previewLeaf: WorkspaceLeaf | null = null;
 
 	constructor(controller: QueryController, containerEl: HTMLElement) {
 		super(controller);
@@ -93,6 +101,21 @@ export class TaskRelayView extends BasesView {
 		};
 		this.registerEvent(this.app.vault.on('modify', onChange));
 		this.registerEvent(this.app.metadataCache.on('changed', onChange));
+
+		// Allow dropping a task card straight onto an open Markdown editor.
+		// Capture phase runs before the editor's own drop handling.
+		this.registerDomEvent(
+			document,
+			'dragover',
+			(event) => this.onEditorDragOver(event),
+			{ capture: true },
+		);
+		this.registerDomEvent(
+			document,
+			'drop',
+			(event) => this.onEditorDrop(event),
+			{ capture: true },
+		);
 	}
 
 	private provenanceOptions(): ProvenanceOptions {
@@ -227,17 +250,28 @@ export class TaskRelayView extends BasesView {
 			void toggleTask(this.app, sourcePath, task, checkbox.checked);
 		});
 
-		cardEl.createSpan({ cls: 'task-relay-card-text', text: task.text });
+		const textEl = cardEl.createDiv('task-relay-card-text');
+		void MarkdownRenderer.render(
+			this.app,
+			task.text,
+			textEl,
+			sourcePath,
+			this,
+		);
 
 		cardEl.addEventListener('dragstart', (event) => {
 			if (!event.dataTransfer) return;
 			const payload: DragPayload = { sourcePath, task };
+			this.pendingDrag = payload;
 			event.dataTransfer.setData(DRAG_MIME, JSON.stringify(payload));
 			event.dataTransfer.effectAllowed = 'move';
 			cardEl.addClass('is-dragging');
 			logger.info('Drag start', { sourcePath, text: task.text });
 		});
-		cardEl.addEventListener('dragend', () => cardEl.removeClass('is-dragging'));
+		cardEl.addEventListener('dragend', () => {
+			cardEl.removeClass('is-dragging');
+			this.pendingDrag = null;
+		});
 	}
 
 	private makeDropTarget(sectionEl: HTMLElement, destPath: string): void {
@@ -273,16 +307,59 @@ export class TaskRelayView extends BasesView {
 			return;
 		}
 		if (!payload?.sourcePath || !payload.task) return;
+		await this.performMove(payload, destPath, event.shiftKey);
+	}
+
+	/** Handle a task card dropped directly onto an open Markdown editor. */
+	private onEditorDragOver(event: DragEvent): void {
+		if (!this.pendingDrag) return;
+		if (!this.markdownFileAt(event.target)) return;
+		event.preventDefault();
+		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+	}
+
+	private onEditorDrop(event: DragEvent): void {
+		if (!this.pendingDrag) return;
+		const file = this.markdownFileAt(event.target);
+		if (!file) return;
+		// Beat the editor's own drop handling so the task is not also inserted.
+		event.preventDefault();
+		event.stopPropagation();
+		const payload = this.pendingDrag;
+		this.pendingDrag = null;
+		void this.performMove(payload, file.path, event.shiftKey);
+	}
+
+	/** Find the file of the Markdown editor under the given drop target, if any. */
+	private markdownFileAt(target: EventTarget | null): TFile | null {
+		if (!(target instanceof Node)) return null;
+		let result: TFile | null = null;
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			const view = leaf.view;
+			if (
+				view instanceof MarkdownView &&
+				view.file &&
+				view.containerEl.contains(target)
+			) {
+				result = view.file;
+			}
+		});
+		return result;
+	}
+
+	private async performMove(
+		payload: DragPayload,
+		destPath: string,
+		shiftKey: boolean,
+	): Promise<void> {
 		if (payload.sourcePath === destPath) {
-			logger.info('Drop ignored: same note', { destPath });
+			logger.info('Move ignored: same note', { destPath });
 			return;
 		}
 
-		const useRaw = this.rawMoveDefault()
-			? !event.shiftKey
-			: event.shiftKey;
+		const useRaw = this.rawMoveDefault() ? !shiftKey : shiftKey;
 
-		logger.info('Drop', {
+		logger.info('Move', {
 			sourcePath: payload.sourcePath,
 			destPath,
 			useRaw,
@@ -326,8 +403,38 @@ export class TaskRelayView extends BasesView {
 		this.scheduleRender();
 	}
 
+	/** Open a note beside the workbench, on the left, reusing one preview leaf. */
 	private openNote(file: TFile): void {
-		const leaf = this.app.workspace.getLeaf('split', 'vertical');
+		const leaf = this.getPreviewLeaf();
 		void leaf.openFile(file);
+		this.app.workspace.setActiveLeaf(leaf, { focus: true });
+	}
+
+	private getPreviewLeaf(): WorkspaceLeaf {
+		if (this.previewLeaf && this.leafExists(this.previewLeaf)) {
+			return this.previewLeaf;
+		}
+		const own = this.findOwnLeaf();
+		const leaf = own
+			? this.app.workspace.createLeafBySplit(own, 'vertical', true)
+			: this.app.workspace.getLeaf('split', 'vertical');
+		this.previewLeaf = leaf;
+		return leaf;
+	}
+
+	private leafExists(target: WorkspaceLeaf): boolean {
+		let exists = false;
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			if (leaf === target) exists = true;
+		});
+		return exists;
+	}
+
+	private findOwnLeaf(): WorkspaceLeaf | null {
+		let found: WorkspaceLeaf | null = null;
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			if (leaf.view?.containerEl?.contains(this.rootEl)) found = leaf;
+		});
+		return found;
 	}
 }
