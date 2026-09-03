@@ -518,9 +518,10 @@ export class TaskRelayView extends BasesView {
 			this.previewLeaf = existing;
 			return existing;
 		}
-		// Nothing open yet: create a pane on the left of the workbench.
+		// Nothing open yet: create a pane beside the workbench (right by default).
+		const openLeft = this.config?.get(CONFIG_KEYS.openLeft) === true;
 		const leaf = own
-			? this.app.workspace.createLeafBySplit(own, 'vertical', true)
+			? this.app.workspace.createLeafBySplit(own, 'vertical', openLeft)
 			: this.app.workspace.getLeaf('split', 'vertical');
 		this.previewLeaf = leaf;
 		return leaf;

@@ -15,6 +15,7 @@ export const CONFIG_KEYS = {
 	pulledWording: 'taskRelayPulledWording',
 	manualOrder: 'taskRelayManualOrder',
 	order: 'taskRelayOrder',
+	openLeft: 'taskRelayOpenLeft',
 } as const;
 
 /** Default provenance formatting. */

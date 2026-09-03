@@ -50,6 +50,12 @@ function viewOptions(): BasesAllOptions[] {
 					default: false,
 				},
 				{
+					type: 'toggle',
+					displayName: 'Open notes on the left (default: right)',
+					key: CONFIG_KEYS.openLeft,
+					default: false,
+				},
+				{
 					type: 'text',
 					displayName: 'Provenance separator',
 					key: CONFIG_KEYS.separator,
