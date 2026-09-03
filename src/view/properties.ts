@@ -8,11 +8,32 @@ function isDateLike(value: unknown): value is string {
 }
 
 /**
- * Render the note's Base-visible properties into the section header. Boolean and
- * date properties sourced from note frontmatter become inline editable controls;
- * everything else is shown as a read-only chip. The set of properties comes
- * entirely from the Base view configuration, so the plugin has no opinion about
- * property names or methodology.
+ * Look up Obsidian's declared type for a property (e.g. `checkbox`, `date`).
+ * This lets us render an editable control even when a note does not yet have
+ * the property in its frontmatter. The metadata type manager is not part of the
+ * public typings, so we access it defensively and degrade gracefully.
+ */
+function getDeclaredType(app: App, name: string): string | undefined {
+	const manager = (
+		app as unknown as {
+			metadataTypeManager?: {
+				getPropertyInfo?: (key: string) => { type?: string } | undefined;
+				properties?: Record<string, { type?: string } | undefined>;
+			};
+		}
+	).metadataTypeManager;
+	if (!manager) return undefined;
+	const key = name.toLowerCase();
+	const info = manager.getPropertyInfo?.(key) ?? manager.properties?.[key];
+	return info?.type;
+}
+
+/**
+ * Render the note's Base-visible properties into the section header. Checkbox
+ * and date properties become inline editable controls — shown even when the
+ * note does not yet have a value, so they can be set directly. Everything else
+ * is a read-only chip. The set of properties comes entirely from the Base view
+ * configuration, so the plugin has no opinion about property names.
  */
 export function renderProperties(
 	app: App,
@@ -31,16 +52,37 @@ export function renderProperties(
 		if (parsed.type === 'file' && parsed.name === 'name') continue;
 
 		const label = config.getDisplayName(propId);
-		const fmValue = frontmatter[parsed.name];
-		const editable = parsed.type === 'note';
 
-		if (editable && typeof fmValue === 'boolean') {
-			renderBoolean(app, containerEl, file, parsed.name, label, fmValue);
-			continue;
-		}
-		if (editable && isDateLike(fmValue)) {
-			renderDate(app, containerEl, file, parsed.name, label, fmValue);
-			continue;
+		if (parsed.type === 'note') {
+			const fmValue = frontmatter[parsed.name];
+			const declared = getDeclaredType(app, parsed.name);
+
+			if (declared === 'checkbox' || typeof fmValue === 'boolean') {
+				renderBoolean(
+					app,
+					containerEl,
+					file,
+					parsed.name,
+					label,
+					fmValue === true,
+				);
+				continue;
+			}
+			if (
+				declared === 'date' ||
+				declared === 'datetime' ||
+				isDateLike(fmValue)
+			) {
+				renderDate(
+					app,
+					containerEl,
+					file,
+					parsed.name,
+					label,
+					typeof fmValue === 'string' ? fmValue : '',
+				);
+				continue;
+			}
 		}
 
 		const value = entry.getValue(propId);
