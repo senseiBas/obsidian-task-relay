@@ -13,7 +13,7 @@ function isDateLike(value: unknown): value is string {
  * Bases may store in the view config; bare names are treated as note
  * (frontmatter) properties.
  */
-function parseProp(propId: string): { type: string; name: string } {
+export function parseProp(propId: string): { type: string; name: string } {
 	const dot = propId.indexOf('.');
 	if (dot > 0) {
 		const type = propId.slice(0, dot);
@@ -25,24 +25,29 @@ function parseProp(propId: string): { type: string; name: string } {
 }
 
 /**
- * Look up Obsidian's declared type for a property (e.g. `checkbox`, `date`).
- * This lets us render an editable control even when a note does not yet have
- * the property in its frontmatter. The metadata type manager is not part of the
- * public typings, so we access it defensively and degrade gracefully.
+ * Look up Obsidian's declared widget type for a property (e.g. `checkbox`,
+ * `date`). This lets us render an editable control even when no note has the
+ * property yet. The metadata type manager is not part of the public typings, so
+ * we access it defensively and degrade gracefully.
  */
 function getDeclaredType(app: App, name: string): string | undefined {
 	const manager = (
 		app as unknown as {
 			metadataTypeManager?: {
-				getPropertyInfo?: (key: string) => { type?: string } | undefined;
-				properties?: Record<string, { type?: string } | undefined>;
+				getPropertyInfo?: (
+					key: string,
+				) => { widget?: string; type?: string } | undefined;
+				properties?: Record<
+					string,
+					{ widget?: string; type?: string } | undefined
+				>;
 			};
 		}
 	).metadataTypeManager;
 	if (!manager) return undefined;
 	const key = name.toLowerCase();
 	const info = manager.getPropertyInfo?.(key) ?? manager.properties?.[key];
-	return info?.type;
+	return info?.widget ?? info?.type;
 }
 
 /**
