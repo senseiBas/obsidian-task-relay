@@ -411,15 +411,35 @@ export class TaskRelayView extends BasesView {
 	}
 
 	private getPreviewLeaf(): WorkspaceLeaf {
+		// Reuse the leaf we opened last time, if it still exists.
 		if (this.previewLeaf && this.leafExists(this.previewLeaf)) {
 			return this.previewLeaf;
 		}
 		const own = this.findOwnLeaf();
+		// Otherwise reuse an already-open Markdown pane (replace it, like a link),
+		// rather than spawning a new tab.
+		const existing = this.findReusableMarkdownLeaf(own);
+		if (existing) {
+			this.previewLeaf = existing;
+			return existing;
+		}
+		// Nothing open yet: create a pane on the left of the workbench.
 		const leaf = own
 			? this.app.workspace.createLeafBySplit(own, 'vertical', true)
 			: this.app.workspace.getLeaf('split', 'vertical');
 		this.previewLeaf = leaf;
 		return leaf;
+	}
+
+	private findReusableMarkdownLeaf(
+		own: WorkspaceLeaf | null,
+	): WorkspaceLeaf | null {
+		let found: WorkspaceLeaf | null = null;
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			if (found || leaf === own) return;
+			if (leaf.view instanceof MarkdownView) found = leaf;
+		});
+		return found;
 	}
 
 	private leafExists(target: WorkspaceLeaf): boolean {
