@@ -22,14 +22,44 @@ import {
 	DEFAULT_SEPARATOR,
 	VIEW_TYPE,
 } from '../constants';
-import type { DragPayload, ParsedTask, ProvenanceOptions } from '../types';
-import { parseOpenTasks } from '../tasks/parser';
-import { pullTask, rawMoveTask, toggleTask } from '../tasks/mutation';
+import type {
+	DragPayload,
+	NoteDragPayload,
+	ParsedTask,
+	ProvenanceOptions,
+	TaskDragPayload,
+} from '../types';
+import { isOpen, parseOpenTasks, parseTaskLine } from '../tasks/parser';
+import {
+	addContinueNoteTask,
+	addTask,
+	pullTask,
+	rawMoveTask,
+	toggleTask,
+} from '../tasks/mutation';
+import { requestTaskText } from './add-task-modal';
 import { renderProperties } from './properties';
 import { logger } from '../logger';
 
 const DRAG_MIME = 'application/json';
 const SECTION_MIME = 'application/x-task-relay-section';
+const consumedDragIds = new Set<string>();
+
+type CodeMirrorEditor = {
+	cm?: {
+		posAtDOM?: (node: Node, offset?: number) => number;
+		state?: {
+			doc?: {
+				lineAt: (position: number) => { number: number };
+			};
+		};
+	};
+};
+
+interface EditorTaskDragCandidate {
+	element: HTMLElement;
+	payload: TaskDragPayload;
+}
 
 /**
  * A custom Bases view that turns the notes selected by a Base into a task
@@ -46,6 +76,8 @@ export class TaskRelayView extends BasesView {
 
 	/** Paths whose sections are collapsed (session state). */
 	private readonly collapsed = new Set<string>();
+	/** Paths seen in a previous render, so new notes can default to collapsed. */
+	private readonly seenPaths = new Set<string>();
 	/** Paths currently rendered, used to react to relevant vault changes. */
 	private displayedPaths = new Set<string>();
 	/** Paths in current render order, used as the basis for manual reordering. */
@@ -53,10 +85,12 @@ export class TaskRelayView extends BasesView {
 
 	private eventsReady = false;
 	private renderToken = 0;
+	private dragSeq = 0;
 	private readonly scheduleRender: Debouncer<[], void>;
 
 	/** The task currently being dragged, so drops onto open editors also work. */
 	private pendingDrag: DragPayload | null = null;
+	private editorDragElement: HTMLElement | null = null;
 	/** The leaf used to show opened notes, reused across clicks. */
 	private previewLeaf: WorkspaceLeaf | null = null;
 
@@ -91,6 +125,10 @@ export class TaskRelayView extends BasesView {
 			for (const path of this.displayedPaths) this.collapsed.add(path);
 			this.scheduleRender();
 		});
+		this.toolbarEl.createDiv({
+			cls: 'task-relay-toolbar-hint',
+			text: 'Ctrl+drag an open task from a note into a card.',
+		});
 	}
 
 	/** Register vault listeners once, so body edits (not just Base data) refresh. */
@@ -119,6 +157,25 @@ export class TaskRelayView extends BasesView {
 			(event) => this.onEditorDrop(event),
 			{ capture: true },
 		);
+		this.registerDomEvent(
+			document,
+			'mousedown',
+			(event) => this.onEditorMouseDown(event),
+			{ capture: true },
+		);
+		this.registerDomEvent(
+			document,
+			'dragstart',
+			(event) => this.onEditorDragStart(event),
+			{ capture: true },
+		);
+		this.registerDomEvent(
+			document,
+			'mouseup',
+			() => this.clearEditorDragElement(),
+			{ capture: true },
+		);
+		this.registerDomEvent(document, 'dragend', () => this.clearEditorDrag());
 	}
 
 	private provenanceOptions(): ProvenanceOptions {
@@ -179,6 +236,16 @@ export class TaskRelayView extends BasesView {
 		this.displayedPaths = new Set(files.map((file) => file.path));
 		this.renderedOrder = files.map((file) => file.path);
 
+		// Sections are collapsed by default: any path we haven't rendered before
+		// starts collapsed. Once seen, its state is left to the user (toggle,
+		// Expand all / Collapse all).
+		for (const path of this.displayedPaths) {
+			if (!this.seenPaths.has(path)) {
+				this.seenPaths.add(path);
+				this.collapsed.add(path);
+			}
+		}
+
 		const contents = await Promise.all(
 			files.map((file) =>
 				this.app.vault.cachedRead(file).catch(() => ''),
@@ -220,6 +287,7 @@ export class TaskRelayView extends BasesView {
 		const sectionEl = this.listEl.createDiv({
 			cls: 'task-relay-note',
 		});
+		sectionEl.setAttribute('draggable', 'true');
 		if (isCollapsed) sectionEl.addClass('is-collapsed');
 
 		const headerEl = sectionEl.createDiv('task-relay-note-header');
@@ -228,17 +296,42 @@ export class TaskRelayView extends BasesView {
 			const grip = headerEl.createSpan('task-relay-grip');
 			setIcon(grip, 'grip-vertical');
 			grip.setAttribute('aria-label', 'Drag to reorder');
-			headerEl.setAttribute('draggable', 'true');
-			headerEl.addEventListener('dragstart', (event) => {
+			grip.setAttribute('draggable', 'true');
+			grip.addEventListener('dragstart', (event) => {
+				event.stopPropagation();
 				if (!event.dataTransfer) return;
 				event.dataTransfer.setData(SECTION_MIME, file.path);
 				event.dataTransfer.effectAllowed = 'move';
 				sectionEl.addClass('is-reordering');
 			});
-			headerEl.addEventListener('dragend', () =>
+			grip.addEventListener('dragend', () =>
 				sectionEl.removeClass('is-reordering'),
 			);
 		}
+
+		sectionEl.addEventListener('dragstart', (event) => {
+			if (!event.dataTransfer) return;
+			if (this.shouldIgnoreNoteDragStart(event.target)) return;
+			const payload: NoteDragPayload = {
+				kind: 'note',
+				dragId: this.beginDrag(),
+				sourcePath: file.path,
+				noteName: file.basename,
+			};
+			this.pendingDrag = payload;
+			event.dataTransfer.clearData();
+			event.dataTransfer.setData(DRAG_MIME, JSON.stringify(payload));
+			event.dataTransfer.effectAllowed = 'copyMove';
+			sectionEl.addClass('is-dragging-note');
+			logger.info('Note drag start', {
+				sourcePath: file.path,
+				noteName: file.basename,
+			});
+		});
+		sectionEl.addEventListener('dragend', () => {
+			sectionEl.removeClass('is-dragging-note');
+			this.pendingDrag = null;
+		});
 
 		const chevron = headerEl.createSpan('task-relay-chevron');
 		setIcon(chevron, isCollapsed ? 'chevron-right' : 'chevron-down');
@@ -254,6 +347,11 @@ export class TaskRelayView extends BasesView {
 			cls: 'task-relay-note-count',
 			text: String(tasks.length),
 		});
+
+		const addBtn = headerEl.createSpan('task-relay-add');
+		setIcon(addBtn, 'plus');
+		addBtn.setAttribute('aria-label', 'Add task');
+		addBtn.addEventListener('click', () => void this.handleAddTask(file));
 
 		const openBtn = headerEl.createSpan('task-relay-open');
 		setIcon(openBtn, 'square-arrow-out-up-right');
@@ -283,6 +381,24 @@ export class TaskRelayView extends BasesView {
 		this.makeDropTarget(sectionEl, file.path);
 	}
 
+	private shouldIgnoreNoteDragStart(target: EventTarget | null): boolean {
+		if (!(target instanceof Element)) return false;
+		return Boolean(
+			target.closest(
+				[
+					'.task-relay-card',
+					'.task-relay-grip',
+					'.task-relay-chevron',
+					'.task-relay-add',
+					'.task-relay-open',
+					'button',
+					'input',
+					'a',
+				].join(', '),
+			),
+		);
+	}
+
 	private renderCard(
 		containerEl: HTMLElement,
 		sourcePath: string,
@@ -310,8 +426,14 @@ export class TaskRelayView extends BasesView {
 
 		cardEl.addEventListener('dragstart', (event) => {
 			if (!event.dataTransfer) return;
-			const payload: DragPayload = { sourcePath, task };
+			const payload: TaskDragPayload = {
+				kind: 'task',
+				dragId: this.beginDrag(),
+				sourcePath,
+				task,
+			};
 			this.pendingDrag = payload;
+			event.dataTransfer.clearData();
 			event.dataTransfer.setData(DRAG_MIME, JSON.stringify(payload));
 			event.dataTransfer.effectAllowed = 'move';
 			cardEl.addClass('is-dragging');
@@ -331,12 +453,17 @@ export class TaskRelayView extends BasesView {
 		};
 		sectionEl.addEventListener('dragover', (event) => {
 			event.preventDefault();
-			if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
 			if (this.isSectionDrag(event)) {
+				if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
 				const before = this.isAbove(event, sectionEl);
 				sectionEl.toggleClass('is-reorder-before', before);
 				sectionEl.toggleClass('is-reorder-after', !before);
 			} else {
+				if (event.dataTransfer) {
+					event.dataTransfer.dropEffect = this.pendingDrag?.kind === 'note'
+						? 'copy'
+						: 'move';
+				}
 				sectionEl.addClass('is-drop-target');
 			}
 		});
@@ -386,49 +513,207 @@ export class TaskRelayView extends BasesView {
 	}
 
 	private async handleDrop(destPath: string, event: DragEvent): Promise<void> {
-		const raw = event.dataTransfer?.getData(DRAG_MIME);
-		if (!raw) {
+		const payload = this.dragPayload(event);
+		if (!payload) {
 			logger.info('Drop ignored: no drag payload', { destPath });
 			return;
 		}
-		let payload: DragPayload;
-		try {
-			payload = JSON.parse(raw) as DragPayload;
-		} catch (error) {
-			logger.error('Drop failed: invalid payload', {
-				destPath,
-				error: String(error),
-			});
-			return;
-		}
-		if (!payload?.sourcePath || !payload.task) return;
-		await this.performMove(payload, destPath, event.shiftKey);
+		if (!this.claimDrop(payload)) return;
+		if (!payload?.sourcePath) return;
+		await this.performDrop(payload, destPath, event.shiftKey);
 	}
 
 	/** Handle a task card dropped directly onto an open Markdown editor. */
 	private onEditorDragOver(event: DragEvent): void {
-		if (!this.pendingDrag) return;
+		if (!this.pendingDrag && !this.hasDragPayload(event)) return;
 		if (!this.markdownFileAt(event.target)) return;
 		event.preventDefault();
-		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+		if (event.dataTransfer) {
+			event.dataTransfer.dropEffect =
+				this.pendingDrag?.kind === 'note' ? 'copy' : 'move';
+		}
 	}
 
 	private onEditorDrop(event: DragEvent): void {
-		if (!this.pendingDrag) return;
 		const file = this.markdownFileAt(event.target);
 		if (!file) return;
+		const payload = this.dragPayload(event);
+		if (!payload) return;
+		if (!this.claimDrop(payload)) return;
 		// Beat the editor's own drop handling so the task is not also inserted.
 		event.preventDefault();
 		event.stopPropagation();
-		const payload = this.pendingDrag;
 		this.pendingDrag = null;
-		void this.performMove(payload, file.path, event.shiftKey);
+		void this.performDrop(payload, file.path, event.shiftKey);
+	}
+
+	private hasDragPayload(event: DragEvent): boolean {
+		const types = event.dataTransfer?.types;
+		return types ? Array.from(types).includes(DRAG_MIME) : false;
+	}
+
+	private dragPayload(event: DragEvent): DragPayload | null {
+		if (this.pendingDrag) return this.pendingDrag;
+		const raw = event.dataTransfer?.getData(DRAG_MIME);
+		if (!raw) return null;
+		try {
+			return JSON.parse(raw) as DragPayload;
+		} catch (error) {
+			logger.error('Drop failed: invalid payload', { error: String(error) });
+			return null;
+		}
+	}
+
+	/** Make open Markdown task lines draggable from an editor into Task Relay. */
+	private onEditorMouseDown(event: MouseEvent): void {
+		this.clearEditorDragElement();
+		if (!this.isEditorDragModifierPressed(event)) return;
+		const candidate = this.editorTaskDragCandidate(event.target);
+		if (!candidate) return;
+		candidate.element.setAttribute('draggable', 'true');
+		candidate.element.setAttribute('data-task-relay-editor-drag', 'true');
+		this.editorDragElement = candidate.element;
+	}
+
+	private onEditorDragStart(event: DragEvent): void {
+		if (event.target instanceof Node && this.rootEl.contains(event.target)) {
+			return;
+		}
+		if (!this.isEditorDragModifierPressed(event)) {
+			this.clearEditorDragElement();
+			return;
+		}
+		const candidate = this.editorTaskDragCandidate(event.target);
+		if (!candidate || !event.dataTransfer) return;
+		this.pendingDrag = candidate.payload;
+		event.dataTransfer.clearData();
+		event.dataTransfer.setData(DRAG_MIME, JSON.stringify(candidate.payload));
+		event.dataTransfer.effectAllowed = 'move';
+		logger.info('Editor drag start', {
+			sourcePath: candidate.payload.sourcePath,
+			text: candidate.payload.task.text,
+		});
+	}
+
+	private isEditorDragModifierPressed(
+		event: MouseEvent | DragEvent,
+	): boolean {
+		return event.ctrlKey;
+	}
+
+	private editorTaskDragCandidate(
+		target: EventTarget | null,
+	): EditorTaskDragCandidate | null {
+		if (!(target instanceof Node)) return null;
+		const view = this.markdownViewAt(target);
+		if (!view?.file) return null;
+		const line = this.editorLineAt(view, target);
+		if (line === null) return null;
+		const raw = view.editor.getLine(line);
+		const task = parseTaskLine(raw, line);
+		if (!task || !isOpen(task)) return null;
+		const element = this.closestEditorTaskElement(target, view);
+		if (!element) return null;
+		return {
+			element,
+			payload: {
+				kind: 'task',
+				dragId: this.beginDrag(),
+				sourcePath: view.file.path,
+				task,
+			},
+		};
+	}
+
+	private beginDrag(): string {
+		this.dragSeq += 1;
+		return `drag-${Date.now()}-${this.dragSeq}`;
+	}
+
+	private claimDrop(payload: DragPayload): boolean {
+		if (consumedDragIds.has(payload.dragId)) {
+			logger.info('Drop ignored: already handled', {
+				dragId: payload.dragId,
+				sourcePath: payload.sourcePath,
+			});
+			return false;
+		}
+		consumedDragIds.add(payload.dragId);
+		if (consumedDragIds.size > 100) consumedDragIds.clear();
+		return true;
+	}
+
+	private editorLineAt(view: MarkdownView, target: Node): number | null {
+		const cm = (view.editor as unknown as CodeMirrorEditor).cm;
+		if (cm?.posAtDOM && cm.state?.doc?.lineAt) {
+			try {
+				const position = cm.posAtDOM(target);
+				return cm.state.doc.lineAt(position).number - 1;
+			} catch {
+				// Preview mode and some rendered editor widgets are not owned by CM.
+			}
+		}
+		return this.sourceLineFromDataAttribute(target, view);
+	}
+
+	private sourceLineFromDataAttribute(
+		target: Node,
+		view: MarkdownView,
+	): number | null {
+		let el = target instanceof Element ? target : target.parentElement;
+		while (el && view.containerEl.contains(el)) {
+			const value = el.getAttribute('data-line');
+			if (value !== null) {
+				const line = Number.parseInt(value, 10);
+				if (
+					Number.isInteger(line) &&
+					line >= 0 &&
+					line < view.editor.lineCount()
+				) {
+					return line;
+				}
+			}
+			el = el.parentElement;
+		}
+		return null;
+	}
+
+	private closestEditorTaskElement(
+		target: Node,
+		view: MarkdownView,
+	): HTMLElement | null {
+		const el = target instanceof Element ? target : target.parentElement;
+		const taskEl = el?.closest(
+			'.HyperMD-task-line, .cm-line, li.task-list-item, .task-list-item',
+		);
+		if (taskEl instanceof HTMLElement && view.containerEl.contains(taskEl)) {
+			return taskEl;
+		}
+		return el instanceof HTMLElement && view.containerEl.contains(el)
+			? el
+			: null;
+	}
+
+	private clearEditorDrag(): void {
+		this.pendingDrag = null;
+		this.clearEditorDragElement();
+	}
+
+	private clearEditorDragElement(): void {
+		if (!this.editorDragElement) return;
+		this.editorDragElement.removeAttribute('draggable');
+		this.editorDragElement.removeAttribute('data-task-relay-editor-drag');
+		this.editorDragElement = null;
 	}
 
 	/** Find the file of the Markdown editor under the given drop target, if any. */
 	private markdownFileAt(target: EventTarget | null): TFile | null {
+		return this.markdownViewAt(target)?.file ?? null;
+	}
+
+	private markdownViewAt(target: EventTarget | null): MarkdownView | null {
 		if (!(target instanceof Node)) return null;
-		let result: TFile | null = null;
+		let result: MarkdownView | null = null;
 		this.app.workspace.iterateAllLeaves((leaf) => {
 			const view = leaf.view;
 			if (
@@ -436,19 +721,23 @@ export class TaskRelayView extends BasesView {
 				view.file &&
 				view.containerEl.contains(target)
 			) {
-				result = view.file;
+				result = view;
 			}
 		});
 		return result;
 	}
 
-	private async performMove(
+	private async performDrop(
 		payload: DragPayload,
 		destPath: string,
 		shiftKey: boolean,
 	): Promise<void> {
 		if (payload.sourcePath === destPath) {
-			logger.info('Move ignored: same note', { destPath });
+			logger.info('Drop ignored: same note', { destPath });
+			return;
+		}
+		if (payload.kind === 'note') {
+			await this.performNoteDrop(payload, destPath);
 			return;
 		}
 
@@ -487,6 +776,55 @@ export class TaskRelayView extends BasesView {
 				error instanceof Error
 					? error.message
 					: 'Could not move the task.',
+			);
+		}
+		this.scheduleRender();
+	}
+
+	private async performNoteDrop(
+		payload: NoteDragPayload,
+		destPath: string,
+	): Promise<void> {
+		logger.info('Note drop', {
+			sourcePath: payload.sourcePath,
+			destPath,
+			noteName: payload.noteName,
+		});
+
+		try {
+			await addContinueNoteTask(this.app, destPath, payload.noteName);
+			logger.info('Note drop complete', {
+				sourcePath: payload.sourcePath,
+				destPath,
+			});
+		} catch (error) {
+			logger.error('Note drop failed', {
+				sourcePath: payload.sourcePath,
+				destPath,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			new Notice(
+				error instanceof Error
+					? error.message
+					: 'Could not create the note task.',
+			);
+		}
+		this.scheduleRender();
+	}
+
+	private async handleAddTask(file: TFile): Promise<void> {
+		const text = await requestTaskText(this.app, file.basename);
+		if (!text) return;
+		try {
+			await addTask(this.app, file.path, text);
+			logger.info('Task added', { path: file.path, text });
+		} catch (error) {
+			logger.error('Add task failed', {
+				path: file.path,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			new Notice(
+				error instanceof Error ? error.message : 'Could not add the task.',
 			);
 		}
 		this.scheduleRender();

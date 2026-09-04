@@ -6,7 +6,14 @@ import {
 	buildRawMovedLine,
 	DEFAULT_PROVENANCE,
 } from './provenance';
-import { appendLine, removeLine, replaceLine, setTaskStatus } from './document';
+import {
+	appendLine,
+	buildContinueNoteTaskLine,
+	buildOpenTaskLine,
+	removeLine,
+	replaceLine,
+	setTaskStatus,
+} from './document';
 
 export class TaskMutationError extends Error {}
 
@@ -38,6 +45,38 @@ export async function toggleTask(
 	if (!found) {
 		new Notice('Could not find the task to update.');
 	}
+}
+
+/** Append a new open task to the end of a note. */
+export async function addTask(
+	app: App,
+	path: string,
+	text: string,
+): Promise<void> {
+	const file = requireFile(app, path);
+	const value = text.trim();
+	if (!value) {
+		new Notice('Task cannot be empty.');
+		return;
+	}
+	const newLine = buildOpenTaskLine(value);
+	await app.vault.process(file, (data) => appendLine(data, newLine));
+}
+
+/** Append a follow-up task that links to another note. */
+export async function addContinueNoteTask(
+	app: App,
+	path: string,
+	noteName: string,
+): Promise<void> {
+	const file = requireFile(app, path);
+	const value = noteName.trim();
+	if (!value) {
+		new Notice('Note name cannot be empty.');
+		return;
+	}
+	const newLine = buildContinueNoteTaskLine(value);
+	await app.vault.process(file, (data) => appendLine(data, newLine));
 }
 
 /**

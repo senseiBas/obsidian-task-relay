@@ -62,6 +62,21 @@ export function appendLine(content: string, newLine: string): string {
 	return lines.join(eol);
 }
 
+/** Build a normalized open task line from free-form user input. */
+export function buildOpenTaskLine(text: string): string {
+	const trimmed = text.trim();
+	const checkboxMatch = /^[-*+]\s+\[[^\]]\]\s*(.*)$/.exec(trimmed);
+	if (checkboxMatch) return `- [ ] ${checkboxMatch[1] ?? ''}`.trimEnd();
+	const bulletMatch = /^[-*+]\s+(.*)$/.exec(trimmed);
+	if (bulletMatch) return `- [ ] ${bulletMatch[1] ?? ''}`.trimEnd();
+	return `- [ ] ${trimmed}`;
+}
+
+/** Build a follow-up task that links to another note. */
+export function buildContinueNoteTaskLine(noteName: string): string {
+	return buildOpenTaskLine(`werk verder aan [[${noteName.trim()}]]`);
+}
+
 /** Set the checkbox status character (e.g. `' '` or `'x'`) of a task. */
 export function setTaskStatus(
 	content: string,

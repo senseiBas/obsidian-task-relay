@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
 	appendLine,
+	buildContinueNoteTaskLine,
+	buildOpenTaskLine,
 	findTaskLineIndex,
 	removeLine,
 	replaceLine,
@@ -78,6 +80,28 @@ describe('appendLine', () => {
 	it('preserves CRLF endings', () => {
 		expect(appendLine('# Title\r\n', '- [ ] New')).toBe(
 			'# Title\r\n- [ ] New\r\n',
+		);
+	});
+});
+
+describe('buildOpenTaskLine', () => {
+	it('wraps plain text as an open task', () => {
+		expect(buildOpenTaskLine('Buy wood')).toBe('- [ ] Buy wood');
+	});
+
+	it('normalizes a pasted checkbox task', () => {
+		expect(buildOpenTaskLine('- [x] Buy wood')).toBe('- [ ] Buy wood');
+	});
+
+	it('normalizes a pasted bullet item', () => {
+		expect(buildOpenTaskLine('* Buy wood')).toBe('- [ ] Buy wood');
+	});
+});
+
+describe('buildContinueNoteTaskLine', () => {
+	it('builds a linked follow-up task for a note', () => {
+		expect(buildContinueNoteTaskLine('gh-advanced security')).toBe(
+			'- [ ] werk verder aan [[gh-advanced security]]',
 		);
 	});
 });

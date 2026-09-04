@@ -7,6 +7,7 @@
 
 .task-relay-toolbar {
 	display: flex;
+	flex-wrap: wrap;
 	gap: var(--size-4-2);
 	padding: var(--size-4-2) var(--size-4-3);
 	border-bottom: 1px solid var(--background-modifier-border);
@@ -16,6 +17,13 @@
 .task-relay-toolbar-btn {
 	font-size: var(--font-ui-smaller);
 	cursor: pointer;
+}
+
+.task-relay-toolbar-hint {
+	margin-left: auto;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	align-self: center;
 }
 
 .task-relay-list {
@@ -74,6 +82,7 @@
 }
 
 .task-relay-chevron,
+.task-relay-add,
 .task-relay-open {
 	display: inline-flex;
 	align-items: center;
@@ -82,8 +91,13 @@
 }
 
 .task-relay-chevron:hover,
+.task-relay-add:hover,
 .task-relay-open:hover {
 	color: var(--text-normal);
+}
+
+.task-relay-add {
+	margin-left: auto;
 }
 
 .task-relay-note-title {
@@ -103,7 +117,7 @@
 }
 
 .task-relay-open {
-	margin-left: auto;
+	margin-left: 0;
 }
 
 .task-relay-note-meta {
@@ -185,4 +199,10 @@
 .task-relay-card-text a.internal-link,
 .task-relay-card-text a.external-link {
 	cursor: pointer;
+}
+
+.task-relay-modal-error {
+	margin-top: var(--size-4-1);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-error);
 }

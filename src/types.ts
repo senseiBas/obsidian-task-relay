@@ -27,7 +27,19 @@ export interface ProvenanceOptions {
 }
 
 /** Payload serialized into the drag DataTransfer when a task card is dragged. */
-export interface DragPayload {
+export interface TaskDragPayload {
+	kind: 'task';
+	dragId: string;
 	sourcePath: string;
 	task: ParsedTask;
 }
+
+/** Payload serialized when a whole note section is dragged. */
+export interface NoteDragPayload {
+	kind: 'note';
+	dragId: string;
+	sourcePath: string;
+	noteName: string;
+}
+
+export type DragPayload = TaskDragPayload | NoteDragPayload;
