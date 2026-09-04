@@ -348,21 +348,26 @@ export class TaskRelayView extends BasesView {
 			text: String(tasks.length),
 		});
 
-		const addBtn = headerEl.createSpan('task-relay-add');
+		// Right-aligned cluster: note properties next to the title, followed by
+		// the action buttons. Grouping them keeps the buttons flush right even
+		// when a note has no properties to show.
+		const actionsEl = headerEl.createDiv('task-relay-note-actions');
+
+		if (order.length > 0) {
+			const metaEl = actionsEl.createDiv('task-relay-note-meta');
+			renderProperties(this.app, metaEl, entry, this.config, order);
+			if (metaEl.childElementCount === 0) metaEl.remove();
+		}
+
+		const addBtn = actionsEl.createSpan('task-relay-add');
 		setIcon(addBtn, 'plus');
 		addBtn.setAttribute('aria-label', 'Add task');
 		addBtn.addEventListener('click', () => void this.handleAddTask(file));
 
-		const openBtn = headerEl.createSpan('task-relay-open');
+		const openBtn = actionsEl.createSpan('task-relay-open');
 		setIcon(openBtn, 'square-arrow-out-up-right');
 		openBtn.setAttribute('aria-label', 'Open note beside');
 		openBtn.addEventListener('click', () => this.openNote(file));
-
-		if (order.length > 0) {
-			const metaEl = sectionEl.createDiv('task-relay-note-meta');
-			renderProperties(this.app, metaEl, entry, this.config, order);
-			if (metaEl.childElementCount === 0) metaEl.remove();
-		}
 
 		const bodyEl = sectionEl.createDiv('task-relay-note-body');
 		if (isCollapsed) bodyEl.addClass('is-hidden');

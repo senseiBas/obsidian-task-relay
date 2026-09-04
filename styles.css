@@ -96,7 +96,10 @@
 	color: var(--text-normal);
 }
 
-.task-relay-add {
+.task-relay-note-actions {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
 	margin-left: auto;
 }
 
@@ -123,8 +126,9 @@
 .task-relay-note-meta {
 	display: flex;
 	flex-wrap: wrap;
+	align-items: center;
+	justify-content: flex-end;
 	gap: var(--size-4-2);
-	padding: 0 var(--size-4-3) var(--size-4-2);
 }
 
 .task-relay-prop {
