@@ -25,6 +25,39 @@ export function parseProp(propId: string): { type: string; name: string } {
 }
 
 /**
+ * Declared property types that don't make sense as a card title: booleans,
+ * dates, numbers and list-like values. Anything else (plain text, or an unknown
+ * type) is treated as title-eligible, and formula properties always are.
+ */
+const NON_TITLE_TYPES = new Set([
+	'checkbox',
+	'number',
+	'date',
+	'datetime',
+	'time',
+	'multitext',
+	'list',
+	'tags',
+	'aliases',
+	'cssclasses',
+]);
+
+/**
+ * Whether a property can sensibly stand in for the card title. Formula and text
+ * properties qualify; booleans, dates, numbers and lists do not. Used to filter
+ * the "Card title from property" dropdown in the view options.
+ */
+export function isTitleProperty(app: App, propId: string): boolean {
+	const parsed = parseProp(propId);
+	if (parsed.type === 'formula') return true;
+	// Only frontmatter properties beyond formulas; file.* is internal metadata.
+	if (parsed.type !== 'note') return false;
+	const declared = getDeclaredType(app, parsed.name);
+	if (!declared) return true;
+	return !NON_TITLE_TYPES.has(declared);
+}
+
+/**
  * Look up Obsidian's declared widget type for a property (e.g. `checkbox`,
  * `date`). This lets us render an editable control even when no note has the
  * property yet. The metadata type manager is not part of the public typings, so

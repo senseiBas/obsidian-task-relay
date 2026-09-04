@@ -16,6 +16,7 @@ export const CONFIG_KEYS = {
 	manualOrder: 'taskRelayManualOrder',
 	order: 'taskRelayOrder',
 	openLeft: 'taskRelayOpenLeft',
+	titleProperty: 'taskRelayTitleProperty',
 } as const;
 
 /** Default provenance formatting. */

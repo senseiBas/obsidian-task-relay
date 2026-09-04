@@ -1,5 +1,5 @@
 import { Plugin } from 'obsidian';
-import type { BasesAllOptions } from 'obsidian';
+import type { App, BasesAllOptions, BasesPropertyId } from 'obsidian';
 import {
 	CONFIG_KEYS,
 	DEFAULT_MOVED_WORDING,
@@ -10,6 +10,7 @@ import {
 	VIEW_TYPE,
 } from './constants';
 import { TaskRelayView } from './view/workbench-view';
+import { isTitleProperty } from './view/properties';
 import { logger } from './logger';
 
 export default class TaskRelayPlugin extends Plugin {
@@ -21,7 +22,7 @@ export default class TaskRelayPlugin extends Plugin {
 			icon: VIEW_ICON,
 			factory: (controller, containerEl) =>
 				new TaskRelayView(controller, containerEl),
-			options: () => viewOptions(),
+			options: () => viewOptions(this.app),
 		});
 	}
 }
@@ -31,12 +32,20 @@ export default class TaskRelayPlugin extends Plugin {
  * settings, so filtering, sorting and visible properties stay owned by the Base
  * and only the few genuinely presentational choices live here.
  */
-function viewOptions(): BasesAllOptions[] {
+function viewOptions(app: App): BasesAllOptions[] {
 	return [
 		{
 			type: 'group',
 			displayName: 'Task Relay',
 			items: [
+				{
+					type: 'property',
+					displayName: 'Card title from property',
+					key: CONFIG_KEYS.titleProperty,
+					placeholder: 'File name',
+					filter: (prop: BasesPropertyId) =>
+						isTitleProperty(app, prop),
+				},
 				{
 					type: 'toggle',
 					displayName: 'Manual note order (drag headers to reorder)',

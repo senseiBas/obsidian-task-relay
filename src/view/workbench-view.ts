@@ -200,6 +200,28 @@ export class TaskRelayView extends BasesView {
 		return this.config?.get(CONFIG_KEYS.manualOrder) === true;
 	}
 
+	/**
+	 * The display title for a note section. When a title property is configured
+	 * and yields a non-empty value for this note (including formula results),
+	 * use it; otherwise fall back to the file name. Purely presentational — all
+	 * file operations still key off the real path and basename.
+	 */
+	private resolveTitle(entry: BasesEntry, file: TFile): string {
+		const propId = this.config?.get(CONFIG_KEYS.titleProperty);
+		if (typeof propId === 'string' && propId.length > 0) {
+			try {
+				const value = entry.getValue(propId as BasesPropertyId);
+				if (value && value.isTruthy()) {
+					const text = value.toString().trim();
+					if (text) return text;
+				}
+			} catch {
+				// Property not resolvable for this note — fall back below.
+			}
+		}
+		return file.basename;
+	}
+
 	private storedOrder(): string[] {
 		const value = this.config?.get(CONFIG_KEYS.order);
 		return Array.isArray(value)
@@ -339,7 +361,7 @@ export class TaskRelayView extends BasesView {
 
 		const title = headerEl.createSpan({
 			cls: 'task-relay-note-title',
-			text: file.basename,
+			text: this.resolveTitle(entry, file),
 		});
 		title.addEventListener('click', () => this.toggleCollapse(file.path));
 
