@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	isOpen,
 	parseOpenTasks,
+	parseTaskGroups,
 	parseTaskLine,
 	parseTasks,
 } from '../src/tasks/parser';
@@ -77,5 +78,69 @@ describe('parseTasks / parseOpenTasks', () => {
 	it('tolerates CRLF line endings', () => {
 		const crlf = '- [ ] One\r\n- [ ] Two';
 		expect(parseOpenTasks(crlf)).toHaveLength(2);
+	});
+});
+
+describe('parseTaskGroups', () => {
+	it('groups open tasks by their immediate heading, in document order', () => {
+		const doc = [
+			'# Today',
+			'- [ ] A',
+			'## Errands',
+			'- [ ] B',
+			'- [ ] C',
+			'### Later',
+			'- [ ] D',
+		].join('\n');
+		const groups = parseTaskGroups(doc);
+		expect(groups.map((g) => [g.heading, g.level])).toEqual([
+			['Today', 1],
+			['Errands', 2],
+			['Later', 3],
+		]);
+		expect(groups.map((g) => g.tasks.map((t) => t.text))).toEqual([
+			['A'],
+			['B', 'C'],
+			['D'],
+		]);
+	});
+
+	it('puts tasks before any heading in a null-heading group', () => {
+		const doc = ['- [ ] Loose', '# Section', '- [ ] Under'].join('\n');
+		const groups = parseTaskGroups(doc);
+		expect(groups[0]?.heading).toBeNull();
+		expect(groups[0]?.level).toBe(0);
+		expect(groups[0]?.headingLine).toBe(-1);
+		expect(groups[0]?.tasks.map((t) => t.text)).toEqual(['Loose']);
+		expect(groups[1]?.heading).toBe('Section');
+	});
+
+	it('skips headings that have no open tasks', () => {
+		const doc = [
+			'# Empty',
+			'',
+			'# Done only',
+			'- [x] Finished',
+			'# Real',
+			'- [ ] Open',
+		].join('\n');
+		const groups = parseTaskGroups(doc);
+		expect(groups.map((g) => g.heading)).toEqual(['Real']);
+	});
+
+	it('merges tasks under one heading even when separated by other lines', () => {
+		const doc = [
+			'# Today',
+			'- [ ] A',
+			'some note text',
+			'- [ ] B',
+		].join('\n');
+		const groups = parseTaskGroups(doc);
+		expect(groups).toHaveLength(1);
+		expect(groups[0]?.tasks.map((t) => t.text)).toEqual(['A', 'B']);
+	});
+
+	it('returns no groups for a document without open tasks', () => {
+		expect(parseTaskGroups('# Title\n- [x] Done')).toEqual([]);
 	});
 });

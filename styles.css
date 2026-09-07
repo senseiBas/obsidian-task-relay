@@ -154,6 +154,20 @@
 	display: none;
 }
 
+.task-relay-group-header {
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-semibold);
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	margin-top: var(--size-2-2);
+	padding: 0 var(--size-2-1);
+}
+
+.task-relay-group-header:first-child {
+	margin-top: 0;
+}
+
 .task-relay-empty {
 	color: var(--text-faint);
 	font-size: var(--font-ui-smaller);
@@ -182,6 +196,14 @@
 
 .task-relay-card.is-dragging {
 	opacity: 0.5;
+}
+
+.task-relay-card.is-reorder-before {
+	box-shadow: inset 0 2px 0 0 var(--interactive-accent);
+}
+
+.task-relay-card.is-reorder-after {
+	box-shadow: inset 0 -2px 0 0 var(--interactive-accent);
 }
 
 .task-relay-checkbox {

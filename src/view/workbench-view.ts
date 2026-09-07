@@ -29,12 +29,13 @@ import type {
 	ProvenanceOptions,
 	TaskDragPayload,
 } from '../types';
-import { isOpen, parseOpenTasks, parseTaskLine } from '../tasks/parser';
+import { isOpen, parseTaskGroups, parseTaskLine } from '../tasks/parser';
 import {
 	addContinueNoteTask,
 	addTask,
 	pullTask,
 	rawMoveTask,
+	reorderTask,
 	toggleTask,
 } from '../tasks/mutation';
 import { requestTaskText } from './add-task-modal';
@@ -303,7 +304,11 @@ export class TaskRelayView extends BasesView {
 		order: BasesPropertyId[],
 		entry: BasesEntry,
 	): void {
-		const tasks = parseOpenTasks(content);
+		const groups = parseTaskGroups(content);
+		const taskCount = groups.reduce(
+			(total, group) => total + group.tasks.length,
+			0,
+		);
 		const isCollapsed = this.collapsed.has(file.path);
 
 		const sectionEl = this.listEl.createDiv({
@@ -367,7 +372,7 @@ export class TaskRelayView extends BasesView {
 
 		headerEl.createSpan({
 			cls: 'task-relay-note-count',
-			text: String(tasks.length),
+			text: String(taskCount),
 		});
 
 		// Right-aligned cluster: note properties next to the title, followed by
@@ -394,14 +399,22 @@ export class TaskRelayView extends BasesView {
 		const bodyEl = sectionEl.createDiv('task-relay-note-body');
 		if (isCollapsed) bodyEl.addClass('is-hidden');
 
-		if (tasks.length === 0) {
+		if (taskCount === 0) {
 			bodyEl.createDiv({
 				cls: 'task-relay-empty',
 				text: 'No open tasks — drop here',
 			});
 		} else {
-			for (const task of tasks) {
-				this.renderCard(bodyEl, file.path, task);
+			for (const group of groups) {
+				if (group.heading !== null) {
+					bodyEl.createDiv({
+						cls: 'task-relay-group-header',
+						text: group.heading,
+					});
+				}
+				for (const task of group.tasks) {
+					this.renderCard(bodyEl, file.path, task);
+				}
 			}
 		}
 
@@ -469,6 +482,59 @@ export class TaskRelayView extends BasesView {
 		cardEl.addEventListener('dragend', () => {
 			cardEl.removeClass('is-dragging');
 			this.pendingDrag = null;
+		});
+
+		this.makeCardReorderTarget(cardEl, sourcePath, task);
+	}
+
+	/**
+	 * Let a task be dropped onto another task in the SAME note to reorder it,
+	 * physically moving its Markdown line. Cross-note drags fall through to the
+	 * section drop target (append/move), so this only claims same-note drops.
+	 */
+	private makeCardReorderTarget(
+		cardEl: HTMLElement,
+		notePath: string,
+		target: ParsedTask,
+	): void {
+		const isSameNoteTaskDrag = (): boolean => {
+			const drag = this.pendingDrag;
+			return (
+				drag?.kind === 'task' &&
+				drag.sourcePath === notePath &&
+				drag.task.raw !== target.raw
+			);
+		};
+		const clear = () => {
+			cardEl.removeClass('is-reorder-before');
+			cardEl.removeClass('is-reorder-after');
+		};
+		cardEl.addEventListener('dragover', (event) => {
+			if (!isSameNoteTaskDrag()) return;
+			event.preventDefault();
+			event.stopPropagation();
+			if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+			const before = this.isAbove(event, cardEl);
+			cardEl.toggleClass('is-reorder-before', before);
+			cardEl.toggleClass('is-reorder-after', !before);
+		});
+		cardEl.addEventListener('dragleave', clear);
+		cardEl.addEventListener('drop', (event) => {
+			const drag = this.pendingDrag;
+			clear();
+			if (!drag || drag.kind !== 'task' || !isSameNoteTaskDrag()) return;
+			event.preventDefault();
+			event.stopPropagation();
+			const before = this.isAbove(event, cardEl);
+			if (!this.claimDrop(drag)) return;
+			this.pendingDrag = null;
+			logger.info('Reorder task', {
+				notePath,
+				from: drag.task.text,
+				target: target.text,
+				before,
+			});
+			void reorderTask(this.app, notePath, drag.task, target, before);
 		});
 	}
 

@@ -47,6 +47,36 @@ export function removeLine(content: string, task: ParsedTask): DocEdit {
 }
 
 /**
+ * Move a task's line to just before or after a target task's line, within the
+ * same document. Used for drag-reordering: the new order is simply the new line
+ * order, so nothing needs to be persisted anywhere else. Dropping onto a task
+ * that lives under a different heading naturally re-homes the line into that
+ * heading's block, since the line is inserted relative to the target.
+ */
+export function moveTaskLine(
+	content: string,
+	task: ParsedTask,
+	target: ParsedTask,
+	before: boolean,
+): DocEdit {
+	const eol = detectEol(content);
+	const lines = splitLines(content);
+	const from = findTaskLineIndex(lines, task);
+	if (from < 0) return { content, ok: false };
+	const targetIndex = findTaskLineIndex(lines, target);
+	if (targetIndex < 0) return { content, ok: false };
+	if (from === targetIndex) return { content, ok: true };
+
+	const [moved] = lines.splice(from, 1);
+	if (moved === undefined) return { content, ok: false };
+	// Removing `from` shifts every later index down by one.
+	const anchor = targetIndex > from ? targetIndex - 1 : targetIndex;
+	const insertAt = before ? anchor : anchor + 1;
+	lines.splice(insertAt, 0, moved);
+	return { content: lines.join(eol), ok: true };
+}
+
+/**
  * Append a line as the last content line, preserving a single trailing newline
  * if the document already had one.
  */

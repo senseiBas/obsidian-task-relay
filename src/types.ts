@@ -19,6 +19,22 @@ export interface ParsedTask {
 	raw: string;
 }
 
+/**
+ * A run of open tasks that share the same immediate Markdown heading, in
+ * document order. Tasks that appear before any heading form a group with a
+ * `null` heading. Only groups that actually contain open tasks are produced.
+ */
+export interface TaskGroup {
+	/** The immediate heading text, or `null` when the tasks precede any heading. */
+	heading: string | null;
+	/** Heading level 1–6, or 0 when there is no heading. */
+	level: number;
+	/** Zero-based line index of the heading, or -1 when there is no heading. */
+	headingLine: number;
+	/** The open tasks under this heading, in document order. */
+	tasks: ParsedTask[];
+}
+
 /** Options controlling how provenance text is rendered when moving tasks. */
 export interface ProvenanceOptions {
 	separator: string;

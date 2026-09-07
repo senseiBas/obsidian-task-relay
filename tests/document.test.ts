@@ -4,6 +4,7 @@ import {
 	buildContinueNoteTaskLine,
 	buildOpenTaskLine,
 	findTaskLineIndex,
+	moveTaskLine,
 	removeLine,
 	replaceLine,
 	setTaskStatus,
@@ -123,6 +124,60 @@ describe('replaceLine / removeLine', () => {
 		const doc = '- [ ] A\n- [ ] B\n- [ ] C';
 		const edit = removeLine(doc, task('- [ ] B', 1));
 		expect(edit.content).toBe('- [ ] A\n- [ ] C');
+	});
+});
+
+describe('moveTaskLine', () => {
+	const doc = '- [ ] A\n- [ ] B\n- [ ] C\n- [ ] D';
+
+	it('moves a task down, after a later target', () => {
+		const edit = moveTaskLine(doc, task('- [ ] A', 0), task('- [ ] C', 2), false);
+		expect(edit.ok).toBe(true);
+		expect(edit.content).toBe('- [ ] B\n- [ ] C\n- [ ] A\n- [ ] D');
+	});
+
+	it('moves a task up, before an earlier target', () => {
+		const edit = moveTaskLine(doc, task('- [ ] D', 3), task('- [ ] B', 1), true);
+		expect(edit.content).toBe('- [ ] A\n- [ ] D\n- [ ] B\n- [ ] C');
+	});
+
+	it('moves a task to the very top', () => {
+		const edit = moveTaskLine(doc, task('- [ ] C', 2), task('- [ ] A', 0), true);
+		expect(edit.content).toBe('- [ ] C\n- [ ] A\n- [ ] B\n- [ ] D');
+	});
+
+	it('re-homes a task across headings by inserting relative to the target', () => {
+		const grouped = [
+			'# Today',
+			'- [ ] A',
+			'# Tomorrow',
+			'- [ ] B',
+		].join('\n');
+		const edit = moveTaskLine(
+			grouped,
+			task('- [ ] A', 1),
+			task('- [ ] B', 3),
+			false,
+		);
+		expect(edit.content).toBe('# Today\n# Tomorrow\n- [ ] B\n- [ ] A');
+	});
+
+	it('is a no-op when dropped onto itself', () => {
+		const edit = moveTaskLine(doc, task('- [ ] B', 1), task('- [ ] B', 1), true);
+		expect(edit.ok).toBe(true);
+		expect(edit.content).toBe(doc);
+	});
+
+	it('reports failure when a task is gone', () => {
+		const edit = moveTaskLine(doc, task('- [ ] Z', 9), task('- [ ] A', 0), true);
+		expect(edit.ok).toBe(false);
+		expect(edit.content).toBe(doc);
+	});
+
+	it('preserves CRLF endings', () => {
+		const crlf = '- [ ] A\r\n- [ ] B\r\n- [ ] C';
+		const edit = moveTaskLine(crlf, task('- [ ] C', 2), task('- [ ] A', 0), true);
+		expect(edit.content).toBe('- [ ] C\r\n- [ ] A\r\n- [ ] B');
 	});
 });
 

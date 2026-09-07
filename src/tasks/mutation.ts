@@ -10,6 +10,7 @@ import {
 	appendLine,
 	buildContinueNoteTaskLine,
 	buildOpenTaskLine,
+	moveTaskLine,
 	removeLine,
 	replaceLine,
 	setTaskStatus,
@@ -77,6 +78,30 @@ export async function addContinueNoteTask(
 	}
 	const newLine = buildContinueNoteTaskLine(value);
 	await app.vault.process(file, (data) => appendLine(data, newLine));
+}
+
+/**
+ * Reorder a task within its own note by moving its line before or after another
+ * task in the same note. Nothing is persisted beyond the file itself — the order
+ * is simply the line order.
+ */
+export async function reorderTask(
+	app: App,
+	path: string,
+	task: ParsedTask,
+	target: ParsedTask,
+	before: boolean,
+): Promise<void> {
+	const file = requireFile(app, path);
+	let found = true;
+	await app.vault.process(file, (data) => {
+		const edit = moveTaskLine(data, task, target, before);
+		found = edit.ok;
+		return edit.ok ? edit.content : data;
+	});
+	if (!found) {
+		new Notice('Could not reorder the task (it may have changed).');
+	}
 }
 
 /**
