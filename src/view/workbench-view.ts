@@ -4,6 +4,7 @@ import {
 	MarkdownRenderer,
 	MarkdownView,
 	Notice,
+	Platform,
 	setIcon,
 	TAbstractFile,
 	TFile,
@@ -110,6 +111,14 @@ export class TaskRelayView extends BasesView {
 	}
 
 	private buildToolbar(): void {
+		// On mobile there is no cursor for Ctrl+drag and vertical space is tight,
+		// so hide the bulk expand/collapse controls and the hint entirely. Notes
+		// there default to expanded (see renderNow) and can still be collapsed
+		// individually by tapping a note title.
+		if (Platform.isMobile) {
+			this.toolbarEl.addClass('is-hidden');
+			return;
+		}
 		const expand = this.toolbarEl.createEl('button', {
 			cls: 'task-relay-toolbar-btn',
 			text: 'Expand all',
@@ -259,13 +268,14 @@ export class TaskRelayView extends BasesView {
 		this.displayedPaths = new Set(files.map((file) => file.path));
 		this.renderedOrder = files.map((file) => file.path);
 
-		// Sections are collapsed by default: any path we haven't rendered before
-		// starts collapsed. Once seen, its state is left to the user (toggle,
-		// Expand all / Collapse all).
+		// Sections are collapsed by default on desktop: any path we haven't
+		// rendered before starts collapsed. On mobile the default is expanded, so
+		// we only mark paths as seen without collapsing them. Once seen, the state
+		// is left to the user (toggle, Expand all / Collapse all).
 		for (const path of this.displayedPaths) {
 			if (!this.seenPaths.has(path)) {
 				this.seenPaths.add(path);
-				this.collapsed.add(path);
+				if (!Platform.isMobile) this.collapsed.add(path);
 			}
 		}
 
