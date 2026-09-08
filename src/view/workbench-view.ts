@@ -13,6 +13,7 @@ import type {
 	BasesEntry,
 	BasesPropertyId,
 	Debouncer,
+	HoverPopover,
 	QueryController,
 	WorkspaceLeaf,
 } from 'obsidian';
@@ -30,7 +31,7 @@ import type {
 	ProvenanceOptions,
 	TaskDragPayload,
 } from '../types';
-import { isOpen, parseTaskGroups, parseTaskLine } from '../tasks/parser';
+import { isOpen, parseOpenTasks, parseTaskGroups, parseTaskLine } from '../tasks/parser';
 import {
 	addContinueNoteTask,
 	addTask,
@@ -71,6 +72,9 @@ interface EditorTaskDragCandidate {
  */
 export class TaskRelayView extends BasesView {
 	readonly type = VIEW_TYPE;
+
+	/** HoverParent: the core Page Preview plugin manages this popover. */
+	hoverPopover: HoverPopover | null = null;
 
 	private readonly rootEl: HTMLElement;
 	private readonly toolbarEl: HTMLElement;
@@ -298,6 +302,11 @@ export class TaskRelayView extends BasesView {
 			return;
 		}
 
+		if (this.flatTasks()) {
+			this.renderFlatList(files, contents);
+			return;
+		}
+
 		entries.forEach((entry, index) => {
 			this.renderNoteSection(
 				entry.file,
@@ -306,6 +315,31 @@ export class TaskRelayView extends BasesView {
 				entry,
 			);
 		});
+	}
+
+	/**
+	 * Flat mode: a single list of every open task across the matched notes, with
+	 * no note sections or headings — just each task and a button to its note.
+	 */
+	private renderFlatList(files: TFile[], contents: string[]): void {
+		let total = 0;
+		files.forEach((file, index) => {
+			const tasks = parseOpenTasks(contents[index] ?? '');
+			for (const task of tasks) {
+				this.renderFlatCard(this.listEl, file, task);
+				total++;
+			}
+		});
+		if (total === 0) {
+			this.listEl.createDiv({
+				cls: 'task-relay-placeholder',
+				text: 'No open tasks.',
+			});
+		}
+	}
+
+	private flatTasks(): boolean {
+		return this.config?.get(CONFIG_KEYS.flatTasks) === true;
 	}
 
 	private renderNoteSection(
@@ -495,6 +529,49 @@ export class TaskRelayView extends BasesView {
 		});
 
 		this.makeCardReorderTarget(cardEl, sourcePath, task);
+	}
+
+	/**
+	 * A card for flat mode: checkbox, task text, and a button that opens the
+	 * source note (and shows Obsidian's page preview on hover).
+	 */
+	private renderFlatCard(
+		containerEl: HTMLElement,
+		file: TFile,
+		task: ParsedTask,
+	): void {
+		const cardEl = containerEl.createDiv('task-relay-card task-relay-flat-card');
+
+		const checkbox = cardEl.createEl('input', {
+			type: 'checkbox',
+			cls: 'task-relay-checkbox',
+		});
+		checkbox.addEventListener('change', () => {
+			void toggleTask(this.app, file.path, task, checkbox.checked);
+		});
+
+		const textEl = cardEl.createDiv('task-relay-card-text');
+		void MarkdownRenderer.render(this.app, task.text, textEl, file.path, this);
+
+		const openBtn = cardEl.createSpan('task-relay-open');
+		setIcon(openBtn, 'square-arrow-out-up-right');
+		openBtn.setAttribute('aria-label', `Open ${file.basename}`);
+		openBtn.addEventListener('click', () => this.openNote(file));
+		openBtn.addEventListener('mouseover', (event) =>
+			this.previewNote(event, openBtn, file),
+		);
+	}
+
+	/** Ask the core Page Preview plugin to show a hover preview of the note. */
+	private previewNote(event: MouseEvent, el: HTMLElement, file: TFile): void {
+		this.app.workspace.trigger('hover-link', {
+			event,
+			source: VIEW_TYPE,
+			hoverParent: this,
+			targetEl: el,
+			linktext: file.path,
+			sourcePath: file.path,
+		});
 	}
 
 	/**

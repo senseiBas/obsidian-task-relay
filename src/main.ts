@@ -17,6 +17,12 @@ export default class TaskRelayPlugin extends Plugin {
 	onload(): void {
 		logger.init(this.app, this.manifest.dir ?? '');
 		logger.info('Plugin loaded', { version: this.manifest.version });
+		// Let the core Page Preview plugin show note previews when hovering the
+		// "open note" buttons this view renders.
+		this.registerHoverLinkSource(VIEW_TYPE, {
+			display: VIEW_NAME,
+			defaultMod: false,
+		});
 		this.registerBasesView(VIEW_TYPE, {
 			name: VIEW_NAME,
 			icon: VIEW_ICON,
@@ -38,6 +44,12 @@ function viewOptions(app: App): BasesAllOptions[] {
 			type: 'group',
 			displayName: 'Task Relay',
 			items: [
+				{
+					type: 'toggle',
+					displayName: 'Flat list: only open tasks (no note grouping)',
+					key: CONFIG_KEYS.flatTasks,
+					default: false,
+				},
 				{
 					type: 'property',
 					displayName: 'Card title from property',
