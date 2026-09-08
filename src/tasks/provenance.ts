@@ -31,6 +31,31 @@ export function stripProvenance(text: string): string {
 	return result.trimEnd();
 }
 
+/**
+ * Matches a trailing Obsidian block-id (`^abc-123`) at the end of task text,
+ * whether it sits at the very start or after a space. Block-ids may contain
+ * letters, digits and hyphens.
+ */
+const BLOCK_ID_SEGMENT = /(?:^|\s)(\^[A-Za-z0-9-]+)\s*$/;
+
+/**
+ * Split a trailing block-id off task text. A block-id must be the last token on
+ * a line to stay valid, so provenance builders extract it first and re-append it
+ * at the very end — otherwise appending "— moved to [[…]]" would push the id
+ * into the middle of the line and silently break the reference (e.g. a Todoist
+ * link). Returns the id including its caret, or null when there is none.
+ */
+export function splitBlockId(text: string): { text: string; blockId: string | null } {
+	const match = BLOCK_ID_SEGMENT.exec(text);
+	if (!match) return { text: text.trimEnd(), blockId: null };
+	return { text: text.slice(0, match.index).trimEnd(), blockId: match[1] ?? null };
+}
+
+/** Append a block-id (with a leading space) when present, else nothing. */
+function blockIdSuffix(blockId: string | null): string {
+	return blockId ? ` ${blockId}` : '';
+}
+
 function wikiLink(target: string): string {
 	return `[[${target}]]`;
 }
@@ -45,30 +70,34 @@ export function buildMovedSourceLine(
 	destination: string,
 	options: ProvenanceOptions = DEFAULT_PROVENANCE,
 ): string {
-	const text = task.text.trimEnd();
+	const { text, blockId } = splitBlockId(task.text);
 	const suffix = `${options.separator}${options.movedWording} ${wikiLink(destination)}`;
-	return `${task.indent}${task.marker} [x] ${text}${suffix}`;
+	return `${task.indent}${task.marker} [x] ${text}${suffix}${blockIdSuffix(blockId)}`;
 }
 
 /**
  * The destination note's new line after a pull: a fresh open task carrying a
  * pointer back to its source. Prior provenance is stripped so the text stays
- * clean; the chain remains reconstructable by following the links.
+ * clean; the chain remains reconstructable by following the links. A trailing
+ * block-id is preserved at the end of the line so references survive the move.
  */
 export function buildPulledLine(
 	task: ParsedTask,
 	source: string,
 	options: ProvenanceOptions = DEFAULT_PROVENANCE,
 ): string {
-	const core = stripProvenance(task.text);
+	const { text, blockId } = splitBlockId(task.text);
+	const core = stripProvenance(text);
 	const suffix = `${options.separator}${options.pulledWording} ${wikiLink(source)}`;
-	return `- [ ] ${core}${suffix}`;
+	return `- [ ] ${core}${suffix}${blockIdSuffix(blockId)}`;
 }
 
 /**
  * A raw move keeps the task verbatim (still open) with no provenance text,
- * normalized to a top-level list item at the destination.
+ * normalized to a top-level list item at the destination. Any trailing block-id
+ * is kept at the end of the line.
  */
 export function buildRawMovedLine(task: ParsedTask): string {
-	return `- [ ] ${task.text.trimEnd()}`;
+	const { text, blockId } = splitBlockId(task.text);
+	return `- [ ] ${text}${blockIdSuffix(blockId)}`;
 }

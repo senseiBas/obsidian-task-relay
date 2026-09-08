@@ -3,6 +3,7 @@ import {
 	buildMovedSourceLine,
 	buildPulledLine,
 	buildRawMovedLine,
+	splitBlockId,
 	stripProvenance,
 } from '../src/tasks/provenance';
 import { parseTaskLine } from '../src/tasks/parser';
@@ -90,6 +91,55 @@ describe('buildRawMovedLine', () => {
 	it('keeps the task verbatim with no provenance', () => {
 		expect(buildRawMovedLine(task('- [ ] Call supplier'))).toBe(
 			'- [ ] Call supplier',
+		);
+	});
+
+	it('keeps a trailing block-id at the end of the line', () => {
+		expect(buildRawMovedLine(task('- [ ] Call supplier ^6hRHcQXM3C2xfXfH'))).toBe(
+			'- [ ] Call supplier ^6hRHcQXM3C2xfXfH',
+		);
+	});
+});
+
+describe('splitBlockId', () => {
+	it('splits a trailing block-id off the text', () => {
+		expect(splitBlockId('Call supplier ^6hRHcQXM3C2xfXfH')).toEqual({
+			text: 'Call supplier',
+			blockId: '^6hRHcQXM3C2xfXfH',
+		});
+	});
+
+	it('returns null when there is no block-id', () => {
+		expect(splitBlockId('Call supplier')).toEqual({
+			text: 'Call supplier',
+			blockId: null,
+		});
+	});
+
+	it('does not treat a mid-text caret as a block-id', () => {
+		expect(splitBlockId('a ^b c')).toEqual({ text: 'a ^b c', blockId: null });
+	});
+});
+
+describe('block-id preservation across provenance', () => {
+	it('keeps the block-id at the end of a moved source line', () => {
+		expect(
+			buildMovedSourceLine(task('- [ ] Call supplier ^6hRHcQXM3C2xfXfH'), 'Daily'),
+		).toBe('- [x] Call supplier — moved to [[Daily]] ^6hRHcQXM3C2xfXfH');
+	});
+
+	it('keeps the block-id at the end of a pulled line', () => {
+		expect(
+			buildPulledLine(task('- [ ] Call supplier ^6hRHcQXM3C2xfXfH'), 'Project X'),
+		).toBe('- [ ] Call supplier — pulled from [[Project X]] ^6hRHcQXM3C2xfXfH');
+	});
+
+	it('strips old provenance but keeps the block-id when re-pulled', () => {
+		const carried = task(
+			'- [ ] Call supplier — pulled from [[Project X]] ^6hRHcQXM3C2xfXfH',
+		);
+		expect(buildPulledLine(carried, 'Weekly')).toBe(
+			'- [ ] Call supplier — pulled from [[Weekly]] ^6hRHcQXM3C2xfXfH',
 		);
 	});
 });
